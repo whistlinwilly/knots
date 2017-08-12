@@ -166,9 +166,10 @@ TODO:
                 this.occupiedCells[x] = new Array(this.cells.y);
             }
 
+            d3.selectAll("path.path").remove()
+
             if (!this.onlyChangedGrid) {
                 this.path = [];
-                d3.selectAll("path.path").remove();
             }
 
             var retries = 0;
