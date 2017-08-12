@@ -11,6 +11,8 @@ TODO:
     ropes can "sync up", i.e. while one moves from y=1 to y=4, the other moves
     from y=2 to y=5. This renders poorly, though maybe with compaction it will
     looks better? Tought to tell at this point.
+  - Keep track of past moves to discourage runs of monotony?
+  - Slider for rope tension?
 -->
 
 <!DOCTYPE html>
@@ -62,6 +64,9 @@ TODO:
         <label for="checkBox">Grid Lines:</label>
         <input id="checkBox" type="checkbox"></input>
         <br>
+        <label for="compact">Compact:</label>
+        <input id="compact" type="checkbox"></input>
+        <br>
         <label for="gridSize">Grid Size:</label>
         <input id="gridSize" type="range" min="5" max="20" value="10" />
         <span id="gridSize">10</span>
@@ -105,6 +110,12 @@ TODO:
                 .on("change", (d, i, x) => {
                     this.renderGridLines = x[i].checked;
                     this.onlyChangedGrid = true;
+                    this.render();
+                });
+
+            d3.select("#config input#compact")
+                .on("change", (d, i, x) => {
+                    this.shouldCompact = x[i].checked;
                     this.render();
                 });
 
@@ -181,7 +192,7 @@ TODO:
             var retryDirections = [-1, 1];
             var found;
 
-            for (var i = 0; i < this.numPaths; i++) {
+            for (var i = 0; i <= this.numPaths; i++) {
                 if (!this.onlyChangedGrid) {
                     this.path.push([]);
 
@@ -193,8 +204,8 @@ TODO:
                         // Dumb heuristic to try to avoid collisions
                         if (this.occupiedCells[curX][curY]) {
                             found = false;
-                            for (var retryJump = 1;
-                                (retryJump <= 3) && !found; retryJump++) {
+                            for (var retryJump = this.cells.y / 4;
+                                (retryJump >= 1) && !found; retryJump--) {
                                 for (var rdi = 0;
                                     (rdi < retryDirections.length) && !found; rdi++) {
                                     var newY = Math.max(Math.min(curY + (retryJump * retryDirections[rdi]), this.cells.y), 0);
@@ -210,23 +221,62 @@ TODO:
                                 throw new Error("Couldn't find a solution!");
                             }
                             retries++;
+                            curY = Math.max(Math.min(curY + Math.floor((Math.random() * 5) - 2), this.cells.y - 1), 0);
                             continue;
                         }
                         retries = 0;
-                        this.occupiedCells[curX][curY] = true;
-                        this.path[i].push([this.origin.x + (curX * this.segmentLength) - (this.segmentLength / 2), this.origin.y + (curY * this.segmentLength) + (this.segmentLength / 2)]);
+                        this.occupiedCells[curX][curY] = i + 1;
+                        this.path[i].push(this.pointFromXY(curX, curY));
                         curX++;
                         curY = Math.max(Math.min(curY + Math.floor((Math.random() * 5) - 2), this.cells.y - 1), 0);
                     }
                 }
+            }
+            if (this.shouldCompact) {
+                this.compact();
+            }
+            for (var j = 1; j <= this.numPaths; j++) {
                 this.svg.append("path")
-                    .datum(this.path[i])
+                    .datum(this.path[j - 1])
                     .attr("class", "path")
                     .attr("style", "filter:url(#dropshadow)")
                     .attr("d", this.line);
             }
             if (this.onlyChangedGrid) {
                 this.onlyChangedGrid = false;
+            }
+        }
+        pointFromXY(x, y) {
+            return [this.origin.x + (x * this.segmentLength) - (this.segmentLength / 2), this.origin.y + (y * this.segmentLength) + (this.segmentLength / 2)];
+        }
+        compact() {
+            var madeChanges = true;
+            var count = 0;
+            while (madeChanges) {
+                if (count > 100) {
+                    return;
+                }
+                count++;
+                madeChanges = false;
+                for (var x = 0; x < this.occupiedCells.length; x++) {
+                    for (var y = 0; y < this.occupiedCells[x].length; y++) {
+                        if (!this.occupiedCells[x][y]) {
+                            continue;
+                        }
+                        if ((y < this.cells.y / 2) && !this.occupiedCells[x][y + 1]) {
+                            this.path[this.occupiedCells[x][y] - 1][x] = this.pointFromXY(x, y + 1);
+                            this.occupiedCells[x][y + 1] = this.occupiedCells[x][y];
+                            delete this.occupiedCells[x][y];
+                            madeChanges = true;
+                        }
+                        if ((y > this.cells.y / 2) && !this.occupiedCells[x][y - 1]) {
+                            this.path[this.occupiedCells[x][y] - 1][x] = this.pointFromXY(x, y - 1);
+                            this.occupiedCells[x][y - 1] = this.occupiedCells[x][y];
+                            delete this.occupiedCells[x][y];
+                            madeChanges = true;
+                        }
+                    }
+                }
             }
         }
     }
