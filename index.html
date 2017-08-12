@@ -68,11 +68,11 @@ TODO:
         <input id="compact" type="checkbox"></input>
         <br>
         <label for="gridSize">Grid Size:</label>
-        <input id="gridSize" type="range" min="5" max="20" value="10" />
+        <input id="gridSize" type="range" min="5" max="30" value="10" />
         <span id="gridSize">10</span>
         <br>
         <label for="range">Num Strings:</label>
-        <input id="range" type="range" min="1" max="10" value="1" />
+        <input id="range" type="range" min="1" max="15" value="1" />
         <span id="range">1</span>
         <br>
         <button style="margin-top: 10px;" id="refresh" type="button">Regenerate!</button>
@@ -140,7 +140,7 @@ TODO:
                     d3.select("#config span#gridSize").property("innerText", x[i].value);
                 });
 
-            this.line = d3.line().curve(d3.curveCardinal.tension(ropeTension));
+            this.line = d3.line().curve(d3.curveCatmullRom.alpha(0.3));
 
         }
         calculateGrid() {
@@ -288,8 +288,8 @@ TODO:
 
     var size = {
         // keep it square
-        width: window.innerHeight * 0.7,
-        height: window.innerHeight * 0.7,
+        width: window.innerHeight * 0.8,
+        height: window.innerHeight * 0.8,
     };
     var kd = new KnotDisplay("body svg", origin, size);
     kd.render();
