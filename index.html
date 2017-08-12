@@ -6,6 +6,11 @@ TODO:
   - Some sort of compaction phase, that shifts cells towards the middle
   - In general more sophistication around depth level, overlap, possible
   next moves (pure up down, overlap yourself, etc).
+  - Conceptually, allowing for bigger leaps to avoid collision on a larger
+    grid seems to increase complexity, but with the current implementation
+    ropes can "sync up", i.e. while one moves from y=1 to y=4, the other moves
+    from y=2 to y=5. This renders poorly, though maybe with compaction it will
+    looks better? Tought to tell at this point.
 -->
 
 <!DOCTYPE html>
@@ -211,7 +216,7 @@ TODO:
                         this.occupiedCells[curX][curY] = true;
                         this.path[i].push([this.origin.x + (curX * this.segmentLength) - (this.segmentLength / 2), this.origin.y + (curY * this.segmentLength) + (this.segmentLength / 2)]);
                         curX++;
-                        curY = Math.max(Math.min(curY + Math.floor((Math.random() * 5) - 3), this.cells.y - 1), 0);
+                        curY = Math.max(Math.min(curY + Math.floor((Math.random() * 5) - 2), this.cells.y - 1), 0);
                     }
                 }
                 this.svg.append("path")
