@@ -1,0 +1,240 @@
+<!--
+TODO:
+  - Need to at least keep track of "overlaps" and toss a coin to decide
+  who gets redrawn, this also probably entails moving to a more advanced
+  state in the grid instead of a simple bool
+  - Some sort of compaction phase, that shifts cells towards the middle
+  - In general more sophistication around depth level, overlap, possible
+  next moves (pure up down, overlap yourself, etc).
+-->
+
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>Knot Display</title>
+<style>
+    .grid {
+        fill: none;
+        stroke: steelblue;
+        stroke-width: 1.5px;
+    }
+
+    .path {
+        fill: none;
+        stroke: #b48846;
+        stroke-width: 15px;
+        stroke-linecap: round;
+    }
+
+    #config {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+    }
+
+    svg {
+        position: relative;
+        left: 0px;
+        top: 0px;
+    }
+</style>
+
+<body>
+    <svg>
+      <filter id="dropshadow" height="130%">
+          <feGaussianBlur in="SourceAlpha" stdDeviation="3" />
+          <!-- stdDeviation is how much to blur -->
+<feOffset dx="2" dy="2" result="offsetblur" />
+<!-- how much to offset -->
+<feMerge>
+    <feMergeNode/>
+    <!-- this contains the offset blurred image -->
+    <feMergeNode in="SourceGraphic" />
+    <!-- this contains the element that the filter is applied to -->
+</feMerge>
+</filter>
+</svg>
+    <div id="config">
+        <label for="checkBox">Grid Lines:</label>
+        <input id="checkBox" type="checkbox"></input>
+        <br>
+        <label for="gridSize">Grid Size:</label>
+        <input id="gridSize" type="range" min="5" max="20" value="10" />
+        <span id="gridSize">10</span>
+        <br>
+        <label for="range">Num Strings:</label>
+        <input id="range" type="range" min="1" max="10" value="1" />
+        <span id="range">1</span>
+        <br>
+        <button style="margin-top: 10px;" id="refresh" type="button">Regenerate!</button>
+    </div>
+</body>
+
+<script src="https://d3js.org/d3.v4.min.js"></script>
+<script>
+    class KnotDisplay {
+        constructor(anchorTag, origin, size) {
+            const ropeTension = 0.01;
+            this.cells = {
+                x: 10,
+                y: 10,
+            };
+
+            this.numPaths = 1;
+            this.path = [];
+
+            this.origin = origin;
+            this.size = size;
+
+            this.calculateGrid();
+
+            this.renderGridLines = true;
+            this.onlyChangedGrid = false;
+
+            this.svg = d3.select(anchorTag)
+                .attr("width", size.width + 2 * origin.x)
+                .attr("height", size.height + 2 * origin.y)
+                .style("margin-left", window.innerWidth / 2 - (size.width + 2 * origin.x) / 2);
+
+            d3.select("#config input#checkBox")
+                .property("checked", "checked")
+                .on("change", (d, i, x) => {
+                    this.renderGridLines = x[i].checked;
+                    this.onlyChangedGrid = true;
+                    this.render();
+                });
+
+            d3.select("#config button")
+                .on("click", _ => {
+                    this.render();
+                });
+
+            d3.select("#config input#range")
+                .on("input change", (d, i, x) => {
+                    this.numPaths = parseInt(x[i].value);
+                    d3.select("#config span#range").property("innerText", x[i].value);
+                });
+
+            d3.select("#config input#gridSize")
+                .on("input change", (d, i, x) => {
+                    this.cells.x = parseInt(x[i].value);
+                    this.cells.y = parseInt(x[i].value);
+                    this.calculateGrid();
+                    this.onlyChangedGrid = true;
+                    this.render();
+                    d3.select("#config span#gridSize").property("innerText", x[i].value);
+                });
+
+            this.line = d3.line().curve(d3.curveCardinal.tension(ropeTension));
+
+        }
+        calculateGrid() {
+            this.segmentLength = Math.min(this.size.width / this.cells.x, this.size.height / this.cells.y);
+            this.grid = [];
+            // vertical lines
+            for (var y = 0; y <= this.cells.y; y++) {
+                this.grid.push([
+                    [this.origin.x, this.origin.y + (y * this.segmentLength)],
+                    [this.origin.x + (this.cells.x * this.segmentLength), this.origin.y + (y * this.segmentLength)]
+                ]);
+            }
+
+            // horizontal lines
+            for (var x = 0; x <= this.cells.x; x++) {
+                this.grid.push([
+                    [this.origin.x + (x * this.segmentLength), this.origin.y],
+                    [this.origin.x + (x * this.segmentLength), this.origin.y + (this.cells.y * this.segmentLength)]
+                ]);
+            }
+        }
+        renderGrid() {
+            d3.selectAll("path.grid").remove();
+            if (this.renderGridLines) {
+                for (var i = 0; i < this.grid.length; i++) {
+                    this.svg.append("path")
+                        .datum(this.grid[i])
+                        .attr("class", "grid")
+                        .attr("d", this.line);
+                }
+            }
+        }
+        render() {
+            this.renderGrid();
+
+            // init empty grid
+            this.occupiedCells = new Array(this.cells.x);
+            for (var x = 0; x < this.cells.x + 2; x++) {
+                this.occupiedCells[x] = new Array(this.cells.y);
+            }
+
+            if (!this.onlyChangedGrid) {
+                this.path = [];
+                d3.selectAll("path.path").remove();
+            }
+
+            var retries = 0;
+            var retryDirections = [-1, 1];
+            var found;
+
+            for (var i = 0; i < this.numPaths; i++) {
+                if (!this.onlyChangedGrid) {
+                    this.path.push([]);
+
+                    // try to make path
+                    var curX = 0;
+                    var curY = Math.floor(Math.random() * this.cells.y);
+                    while (curX < this.cells.x + 2) {
+                        found = true;
+                        // Dumb heuristic to try to avoid collisions
+                        if (this.occupiedCells[curX][curY]) {
+                            found = false;
+                            for (var retryJump = 1;
+                                (retryJump <= 3) && !found; retryJump++) {
+                                for (var rdi = 0;
+                                    (rdi < retryDirections.length) && !found; rdi++) {
+                                    var newY = Math.max(Math.min(curY + (retryJump * retryDirections[rdi]), this.cells.y), 0);
+                                    if (!this.occupiedCells[curX][newY]) {
+                                        curY = newY;
+                                        found = true;
+                                    }
+                                }
+                            }
+                        }
+                        if (!found) {
+                            if (retries == 3) {
+                                throw new Error("Couldn't find a solution!");
+                            }
+                            retries++;
+                            continue;
+                        }
+                        retries = 0;
+                        this.occupiedCells[curX][curY] = true;
+                        this.path[i].push([this.origin.x + (curX * this.segmentLength) - (this.segmentLength / 2), this.origin.y + (curY * this.segmentLength) + (this.segmentLength / 2)]);
+                        curX++;
+                        curY = Math.max(Math.min(curY + Math.floor((Math.random() * 5) - 3), this.cells.y - 1), 0);
+                    }
+                }
+                this.svg.append("path")
+                    .datum(this.path[i])
+                    .attr("class", "path")
+                    .attr("style", "filter:url(#dropshadow)")
+                    .attr("d", this.line);
+            }
+            if (this.onlyChangedGrid) {
+                this.onlyChangedGrid = false;
+            }
+        }
+    }
+
+    var origin = {
+        x: 50,
+        y: 50,
+    };
+
+    var size = {
+        // keep it square
+        width: window.innerHeight * 0.7,
+        height: window.innerHeight * 0.7,
+    };
+    var kd = new KnotDisplay("body svg", origin, size);
+    kd.render();
+</script>
