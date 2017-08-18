@@ -28,8 +28,7 @@ TODO:
     .path {
         fill: none;
         stroke: #b48846;
-        stroke-width: 15px;
-        stroke-linecap: round;
+        stroke-width: 10px;
     }
 
     #config {
@@ -48,7 +47,7 @@ TODO:
 <body>
     <svg>
       <filter id="dropshadow" height="130%">
-          <feGaussianBlur in="SourceAlpha" stdDeviation="3" />
+          <feGaussianBlur in="SourceAlpha" stdDeviation="1" />
           <!-- stdDeviation is how much to blur -->
 <feOffset dx="2" dy="2" result="offsetblur" />
 <!-- how much to offset -->
@@ -140,7 +139,7 @@ TODO:
                     d3.select("#config span#gridSize").property("innerText", x[i].value);
                 });
 
-            this.line = d3.line().curve(d3.curveCatmullRom.alpha(0.3));
+            this.line = d3.line().curve(d3.curveLinear);
 
         }
         calculateGrid() {
@@ -174,77 +173,166 @@ TODO:
             }
         }
         render() {
+            var self = this;
             this.renderGrid();
 
-            // init empty grid
-            this.occupiedCells = new Array(this.cells.x);
-            for (var x = 0; x < this.cells.x + 2; x++) {
-                this.occupiedCells[x] = new Array(this.cells.y);
-            }
+            var emptyCellGrid = function() {
+                var grid = new Array(self.cells.x);
+                for (var x = 0; x < self.cells.x + 2; x++) {
+                    grid[x] = new Array(self.cells.y);
+                }
+                return grid;
+            };
+
+            // init empty grid with two z-levels
+            this.occupiedCells = [];
+            this.occupiedCells.push(emptyCellGrid());
+            this.occupiedCells.push(emptyCellGrid());
 
             d3.selectAll("path.path").remove()
-
             if (!this.onlyChangedGrid) {
                 this.path = [];
-            }
-
-            var retries = 0;
-            var retryDirections = [-1, 1];
-            var found;
-
-            for (var i = 0; i <= this.numPaths; i++) {
-                if (!this.onlyChangedGrid) {
-                    this.path.push([]);
-
-                    // try to make path
-                    var curX = 0;
-                    var curY = Math.floor(Math.random() * this.cells.y);
-                    while (curX < this.cells.x + 2) {
-                        found = true;
-                        // Dumb heuristic to try to avoid collisions
-                        if (this.occupiedCells[curX][curY]) {
-                            found = false;
-                            for (var retryJump = this.cells.y / 4;
-                                (retryJump >= 1) && !found; retryJump--) {
-                                for (var rdi = 0;
-                                    (rdi < retryDirections.length) && !found; rdi++) {
-                                    var newY = Math.max(Math.min(curY + (retryJump * retryDirections[rdi]), this.cells.y), 0);
-                                    if (!this.occupiedCells[curX][newY]) {
-                                        curY = newY;
-                                        found = true;
-                                    }
-                                }
-                            }
-                        }
-                        if (!found) {
-                            if (retries == 3) {
-                                throw new Error("Couldn't find a solution!");
-                            }
-                            retries++;
-                            curY = Math.max(Math.min(curY + Math.floor((Math.random() * 5) - 2), this.cells.y - 1), 0);
-                            continue;
-                        }
-                        retries = 0;
-                        this.occupiedCells[curX][curY] = i + 1;
-                        this.path[i].push(this.pointFromXY(curX, curY));
-                        curX++;
-                        curY = Math.max(Math.min(curY + Math.floor((Math.random() * 5) - 2), this.cells.y - 1), 0);
-                    }
+                for (var i = 0; i <= this.numPaths; i++) {
+                    this.path[i] = this.generateZLevelLeftRightPath(i);
                 }
             }
             if (this.shouldCompact) {
                 this.compact();
             }
-            for (var j = 1; j <= this.numPaths; j++) {
+            for (var j = 0; j < this.numPaths; j++) {
                 this.svg.append("path")
-                    .datum(this.path[j - 1])
+                    .datum(this.path[j])
                     .attr("class", "path")
                     .attr("style", "filter:url(#dropshadow)")
                     .attr("d", this.line);
             }
+            // test overlap render
+            for (var scanX = 0; scanX < this.cells.x + 2; scanX++) {
+                for (var scanY = 0; scanY < this.cells.y; scanY++) {
+                    if (this.occupiedCells[1][scanX][scanY]) {
+                        var overlapPath = [];
+                        for (i = -1; i <= 1; i++) {
+                            overlapPath.push(this.path[this.occupiedCells[0][scanX][scanY]][scanX + i]);
+                        }
+                        this.svg.append("path")
+                            .datum(overlapPath)
+                            .attr("class", "path")
+                            .attr("style", "filter:url(#dropshadow)")
+                            .attr("d", this.line);
+                    }
+                }
+            }
             if (this.onlyChangedGrid) {
                 this.onlyChangedGrid = false;
             }
+        }
+        generateZLevelLeftRightPath(pathId) {
+            var retries = 0;
+            var retryDirections = [-1, 1];
+            var found;
+            var lastOccupiedZ1 = true; // we don't want to collide on the placement move
+            var placedInZ1;
+            var zLevel = 0;
+            var path = [];
+
+            // try to make path
+            var curX = 0;
+            var curY = Math.floor(Math.random() * this.cells.y);
+            while (curX < this.cells.x + 2) {
+                found = true;
+                placedInZ1 = false;
+                // Dumb heuristic to try to avoid collisions
+                if (this.occupiedCells[0][curX][curY]) {
+                    if (this.occupiedCells[1][curX][curY]) {
+                        found = false;
+                        for (var retryJump = this.cells.y / 4;
+                            (retryJump >= 1) && !found; retryJump--) {
+                            for (var rdi = 0;
+                                (rdi < retryDirections.length) && !found; rdi++) {
+                                var newY = Math.max(Math.min(curY + (retryJump * retryDirections[rdi]), this.cells.y), 0);
+                                if (!this.occupiedCells[0][curX][newY] || !this.occupiedCells[1][curX][newY]) {
+                                    curY = newY;
+                                    found = true;
+                                    // if the above statement is true and zlevel 0 is occupied, we must have a free z1
+                                    if (this.occupiedCells[0][curX][newY]) {
+                                        zLevel = 1;
+                                        lastOccupiedZ1 = true;
+                                    } else {
+                                        zLevel = 0;
+                                        lastOccupiedZ1 = false;
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        if (!lastOccupiedZ1) {
+                            zLevel = 1;
+                            lastOccupiedZ1 = true;
+                        } else {
+                            found = false;
+                        }
+                    }
+                } else {
+                    zLevel = 0;
+                    lastOccupiedZ1 = false;
+                }
+                if (!found) {
+                    if (retries == 5) {
+                        throw new Error("Couldn't find a solution!");
+                    }
+                    retries++;
+                    curY = Math.max(Math.min(curY + Math.floor((Math.random() * 5) - 2), this.cells.y - 1), 0);
+                    continue;
+                }
+                retries = 0;
+                this.occupiedCells[zLevel][curX][curY] = pathId + 1;
+                path.push(this.pointFromXY(curX, curY));
+                curX++;
+                curY = Math.max(Math.min(curY + Math.floor((Math.random() * 5) - 2), this.cells.y - 1), 0);
+            }
+            return path;
+        }
+        generateSimpleLeftRightPath(pathId) {
+            var retries = 0;
+            var retryDirections = [-1, 1];
+            var found;
+            var path = [];
+
+            // try to make path
+            var curX = 0;
+            var curY = Math.floor(Math.random() * this.cells.y);
+            while (curX < this.cells.x + 2) {
+                found = true;
+                // Dumb heuristic to try to avoid collisions
+                if (this.occupiedCells[0][curX][curY]) {
+                    found = false;
+                    for (var retryJump = this.cells.y / 4;
+                        (retryJump >= 1) && !found; retryJump--) {
+                        for (var rdi = 0;
+                            (rdi < retryDirections.length) && !found; rdi++) {
+                            var newY = Math.max(Math.min(curY + (retryJump * retryDirections[rdi]), this.cells.y), 0);
+                            if (!this.occupiedCells[0][curX][newY]) {
+                                curY = newY;
+                                found = true;
+                            }
+                        }
+                    }
+                }
+                if (!found) {
+                    if (retries == 100) {
+                        throw new Error("Couldn't find a solution!");
+                    }
+                    retries++;
+                    curY = Math.max(Math.min(curY + Math.floor((Math.random() * 5) - 2), this.cells.y - 1), 0);
+                    continue;
+                }
+                retries = 0;
+                this.occupiedCells[0][curX][curY] = pathId + 1;
+                path.push(this.pointFromXY(curX, curY));
+                curX++;
+                curY = Math.max(Math.min(curY + Math.floor((Math.random() * 5) - 2), this.cells.y - 1), 0);
+            }
+            return path;
         }
         pointFromXY(x, y) {
             return [this.origin.x + (x * this.segmentLength) - (this.segmentLength / 2), this.origin.y + (y * this.segmentLength) + (this.segmentLength / 2)];
@@ -258,21 +346,21 @@ TODO:
                 }
                 count++;
                 madeChanges = false;
-                for (var x = 0; x < this.occupiedCells.length; x++) {
-                    for (var y = 0; y < this.occupiedCells[x].length; y++) {
-                        if (!this.occupiedCells[x][y]) {
+                for (var x = 0; x < this.occupiedCells[0].length; x++) {
+                    for (var y = 0; y < this.occupiedCells[0][x].length; y++) {
+                        if (!this.occupiedCells[0][x][y]) {
                             continue;
                         }
-                        if ((y < this.cells.y / 2) && !this.occupiedCells[x][y + 1]) {
-                            this.path[this.occupiedCells[x][y] - 1][x] = this.pointFromXY(x, y + 1);
-                            this.occupiedCells[x][y + 1] = this.occupiedCells[x][y];
-                            delete this.occupiedCells[x][y];
+                        if ((y < this.cells.y / 2) && !this.occupiedCells[0][x][y + 1]) {
+                            this.path[this.occupiedCells[0][x][y] - 1][x] = this.pointFromXY(x, y + 1);
+                            this.occupiedCells[0][x][y + 1] = this.occupiedCells[0][x][y];
+                            delete this.occupiedCells[0][x][y];
                             madeChanges = true;
                         }
-                        if ((y > this.cells.y / 2) && !this.occupiedCells[x][y - 1]) {
-                            this.path[this.occupiedCells[x][y] - 1][x] = this.pointFromXY(x, y - 1);
-                            this.occupiedCells[x][y - 1] = this.occupiedCells[x][y];
-                            delete this.occupiedCells[x][y];
+                        if ((y > this.cells.y / 2) && !this.occupiedCells[0][x][y - 1]) {
+                            this.path[this.occupiedCells[0][x][y] - 1][x] = this.pointFromXY(x, y - 1);
+                            this.occupiedCells[0][x][y - 1] = this.occupiedCells[0][x][y];
+                            delete this.occupiedCells[0][x][y];
                             madeChanges = true;
                         }
                     }
